@@ -1,13 +1,9 @@
 classdef LCIIS < handle
     
-    properties (Access = protected)
+    properties (Access = private)
         
         packs;
         comms;
-        
-    end
-    
-    properties (Access = private)
         
         toOr;
         orTo;
@@ -16,24 +12,28 @@ classdef LCIIS < handle
         maxNumPack
         bigMat;
         
-        maxIterNewton = 200;
-        minHessRcond = 1e-20;
+        maxIterNewton;
         gradNormThres = 1e-12;
         
     end
     
     methods
         
-        function self = LCIIS(overlap, toOr, numSpin, verbose, maxNumPack)
+        function self = LCIIS(overlap, toOr, numSpin, verbose, maxNumPack, ...
+                              maxIterNewton)
             if nargin < 4
                 verbose = false;
             end
             if nargin < 5
                 maxNumPack = 60;
             end
+            if nargin < 6
+                maxIterNewton = 200;
+            end
             self.verbose = verbose;
             self.packs = {};
             self.maxNumPack = maxNumPack;
+            self.maxIterNewton = maxIterNewton;
             nbf = size(overlap, 1);
             self.comms = zeros(numSpin * nbf * (nbf - 1) / 2, maxNumPack^2);
             self.bigMat = zeros(maxNumPack^2, maxNumPack^2);
@@ -41,7 +41,7 @@ classdef LCIIS < handle
             self.orTo = overlap * toOr;
         end
         
-        function newFockList = NewFock(self, fockList, densList)
+        function newFockList = NewFock(self, fockList, densList, ~)
             if length(self.packs) == self.maxNumPack
                 self.PreUpdateFull();
             else
@@ -55,10 +55,10 @@ classdef LCIIS < handle
                 newPack.trDList{spin} = densList{spin} * self.orTo;
             end
             if length(self.packs) == self.maxNumPack
-                self.packs(1:end-1) = self.packs(2:end);
+                self.packs(1:(end - 1)) = self.packs(2:end);
                 self.packs{end} = newPack;
             else
-                self.packs{end+1} = newPack;
+                self.packs{end + 1} = newPack;
             end
             self.UpdateComms();
             self.UpdateBigMat();
@@ -93,7 +93,7 @@ classdef LCIIS < handle
                 end
             end
             if self.verbose
-                fprintf('  lciis:')
+                fprintf('  coeff:')
                 fprintf(' %6.3f', coeff);
                 fprintf('\n')
             end
@@ -150,7 +150,7 @@ classdef LCIIS < handle
         
         function UpdateComms(self)
             numPack = length(self.packs);
-            for indPack = 1:(numPack-1)
+            for indPack = 1:(numPack - 1)
                 indComm = indPack * numPack;
                 self.comms(:, indComm) = self.CommBetween(indPack, numPack);
             end
@@ -180,7 +180,7 @@ classdef LCIIS < handle
             end
             hess = (hess + hess') ./ 2;
             hessL = [hess, onesVec; onesVec', 0];
-            iniCoeffUse = linsolve(hessL, [zeros(numUse, 1); 1]);
+            [iniCoeffUse, ~] = linsolve(hessL, [zeros(numUse, 1); 1]);
             iniCoeffUse = iniCoeffUse(1:(end - 1));
             ok = ~isnan(sum(iniCoeffUse));
         end
@@ -199,14 +199,17 @@ classdef LCIIS < handle
         
         function [ok, coeffUse] = NewtonSolver(self, tGrad, tHess, coeffUse)
             lagMult = 0;
+            if self.maxIterNewton == 0
+                ok = true;
+                return;
+            end
             for iter = 1:self.maxIterNewton
                 [grad, hess] = self.GradHess(tGrad, tHess, coeffUse);
                 hess = (hess + hess') ./ 2;
                 gradL = [grad + lagMult; 0];
                 onesVec = ones(length(coeffUse), 1);
                 hessL = [hess, onesVec; onesVec', 0];
-                [step, rcond] = linsolve(hessL, gradL);
-                disp(rcond)
+                [step, ~] = linsolve(hessL, gradL);
                 if isnan(sum(step))
                     disp('Inversion failed')
                     ok = false;
@@ -221,13 +224,6 @@ classdef LCIIS < handle
             end
             disp('Newton did not converge');
             ok = false;
-        end
-        
-        function sol = LinSolve(~, mat, vec)
-            [sol, rcond] = linsolve(mat, vec);
-            if rcond > 1e-16
-                return;
-            end
         end
         
     end

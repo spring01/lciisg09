@@ -65,7 +65,7 @@ classdef G09SCF < handle
             self.thresDiffEnergy = 1e-6;
         end
         
-        function [energy, occOrbList, fockList] = RunSCF(self, guess)
+        function energySequence = RunSCF(self, guess)
             if nargin < 2
                 guess = 'harris';
             end
@@ -77,18 +77,45 @@ classdef G09SCF < handle
                 occOrbList = guess;
             end
             densList = self.OccOrbToDens(occOrbList);
-            lciis = SCF.LCIIS(self.overlap, self.toOr, length(densList), self.verbose);
+            
+            switch lower(self.info.converger)
+                case 'lciis'
+                    converger = SCF.LCIIS(self.overlap, self.toOr, ...
+                        length(densList), self.verbose, 20);
+                case 'cdiis' % cdiis is lciis without Newton
+                    converger = SCF.LCIIS(self.overlap, self.toOr, ...
+                        length(densList), self.verbose, 20, 0);
+                case 'ediis'
+                    converger = SCF.EDIIS(self.verbose, 20);
+                case 'adiis'
+                    converger = SCF.ADIIS(self.verbose, 20);
+                case 'ediis+cdiis'
+                    converger = SCF.CombineDIIS();
+                    converger.init = SCF.EDIIS(self.verbose, 20);
+                    converger.final = SCF.LCIIS(self.overlap, self.toOr, ...
+                        length(densList), self.verbose, 20);
+                case 'adiis+cdiis'
+                    converger = SCF.CombineDIIS();
+                    converger.init = SCF.ADIIS(self.verbose, 20);
+                    converger.final = SCF.LCIIS(self.overlap, self.toOr, ...
+                        length(densList), self.verbose, 20);
+            end
             energy = 0.0;
+            energySequence = [];
             for numIter = 1:self.maxSCFIter
-                if self.verbose
-                    fprintf('scf iter %f; energy: %f\n', numIter, energy);
-                end
                 oldEnergy = energy;
                 [fockList, energy] = self.FockEnergy(densList);
-                fockList = lciis.NewFock(fockList, densList);
+                
+                energySequence = [energySequence, energy]; %#ok
+                if self.verbose
+                    fprintf('scf iter %d; energy: %f\n', numIter, energy);
+                end
+                
+                fockList = converger.NewFock(fockList, densList, energy);
                 oldDensList = densList;
                 occOrbList = self.FockToOccOrb(fockList);
                 densList = self.OccOrbToDens(occOrbList);
+                
                 if self.Converged(densList, oldDensList, energy, oldEnergy)
                     break;
                 end
