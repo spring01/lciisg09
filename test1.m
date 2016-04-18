@@ -9,4 +9,4 @@ info.mult = 1;
 info.converger = 'lciis';
 
 scf = SCF.G09SCF(xyz, info, true);
-[energySequence, fockList] = scf.RunSCF()
+energySequence = scf.RunSCF()

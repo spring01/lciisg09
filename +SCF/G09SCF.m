@@ -65,7 +65,7 @@ classdef G09SCF < handle
             self.thresDiffEnergy = 1e-6;
         end
         
-        function [energySequence, fockList] = RunSCF(self, guess)
+        function energySequence = RunSCF(self, guess)
             if nargin < 2
                 guess = 'harris';
             end
