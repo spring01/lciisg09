@@ -59,13 +59,13 @@ classdef G09SCF < handle
             
             self.toOr = self.ToOrtho(self.overlap);
             
-            self.maxSCFIter = 200;
+            self.maxSCFIter = 50;
             self.thresRmsDiffDens = 1e-8;
             self.thresMaxDiffDens = 1e-6;
             self.thresDiffEnergy = 1e-6;
         end
         
-        function energySequence = RunSCF(self, guess)
+        function [energySequence, fockList] = RunSCF(self, guess)
             if nargin < 2
                 guess = 'harris';
             end
@@ -99,6 +99,8 @@ classdef G09SCF < handle
                     converger.init = SCF.ADIIS(self.verbose, 20);
                     converger.final = SCF.LCIIS(self.overlap, self.toOr, ...
                         length(densList), self.verbose, 20);
+                case 'listb'
+                    converger = SCF.LISTb(self.verbose, 20);
             end
             energy = 0.0;
             energySequence = [];
@@ -194,7 +196,8 @@ classdef G09SCF < handle
             [eigVec, eigVal] = eig(overlap);
             eigVal = reshape(diag(eigVal), 1, []);
             keep = eigVal > 1.0e-6;
-            toOr = eigVec(:, keep) ./ repmat(sqrt(eigVal(keep)), size(eigVec, 1), 1);
+            divideBy = sqrt(eigVal(keep));
+            toOr = eigVec(:, keep) ./ repmat(divideBy, size(eigVec, 1), 1);
         end
         
         function occOrbList = GuessHarris(self)

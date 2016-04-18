@@ -2,108 +2,90 @@ classdef LISTb < handle
     
     properties (Access = private)
         
-        fockInVector;
-        fockOutVectors;
-        deltaFockVectors;
+        fockInList;
         
-        densOutVectors;
-        energies;
+        packs;
+        maxNumPack;
+        
+        verbose;
         
     end
     
     methods
         
-        function obj = LISTd(initialFockVec, numVectors, type)
+        function self = LISTb(verbose, maxNumPack)
             if(nargin < 2)
-                numVectors = 5;
+                maxNumPack = 5;
             end
-            if(nargin < 3)
-                type = 'r';
-            end
-            lenVec = numel(initialFockVec);
-            if(strcmpi(type, 'r'))
-                obj.fockOutVectors{1} = zeros(lenVec, numVectors);
-                obj.deltaFockVectors{1} = zeros(lenVec, numVectors);
-                obj.densOutVectors{1} = zeros(lenVec, numVectors);
-            elseif(strcmpi(type, 'u'))
-                throw(MException('LISTd:LISTd', 'not implemented yet'));
-            end
-            obj.energies = zeros(numVectors, 1);
-            obj.fockInVector = initialFockVec;
+            self.packs = {};
+            self.maxNumPack = maxNumPack;
+            self.verbose = verbose;
         end
         
-        function Push(obj, newFockOutVector, newDensOutVector, energy)
-            % push new Fock and density in
-            for spin = 1:length(obj.fockOutVectors)
-                obj.fockOutVectors{spin}(:, 1:end-1) = obj.fockOutVectors{spin}(:, 2:end);
-                obj.fockOutVectors{spin}(:, end) = newFockOutVector(:, spin);
-                
-                obj.densOutVectors{spin}(:, 1:end-1) = obj.densOutVectors{spin}(:, 2:end);
-                obj.densOutVectors{spin}(:, end) = 2*newDensOutVector(:, spin);
-                
-                obj.deltaFockVectors{spin}(:, 1:end-1) = obj.deltaFockVectors{spin}(:, 2:end);
-                obj.deltaFockVectors{spin}(:, end) = (newFockOutVector - obj.fockInVector) / 2;
-            end
-            obj.energies(1:end-1) = obj.energies(2:end);
-            obj.energies(end) = energy;
-        end
-        
-        function PushFockIn(obj, newFockInVector)
-            obj.fockInVector = newFockInVector;
-        end
-        
-        function [optFockVector, coeffs, useFockVectors] = OptFockVector(obj)
-            useFockVectors = cell(1, length(obj.fockOutVectors));
-            optFockVector = zeros(size(obj.fockOutVectors{1}, 1), length(obj.fockOutVectors));
-            numVectors = sum(sum(obj.fockOutVectors{1}.^2) ~= 0);
-            if(numVectors == 0 || numVectors == 1)
-                for spin = 1:length(obj.fockOutVectors)
-                    optFockVector(:, spin) = obj.fockOutVectors{spin}(:, end);
-                    useFockVectors{spin} = obj.fockOutVectors{spin}(:, end);
+        function newFockList = NewFock(self, fockList, densList, energy)
+            newPack.fockList = fockList;
+            newPack.energy = energy;
+            newPack.densList = densList;
+            
+            if ~isempty(self.packs)
+                dFVec = [];
+                for i = 1:length(fockList)
+                    temp = reshape(fockList{i} - self.fockInList{i}, [], 1);
+                    dFVec = [dFVec; temp]; %#ok
                 end
-                if(length(useFockVectors) == 1)
-                    useFockVectors = useFockVectors{1};
-                end
-                coeffs = 1;
+                newPack.dFVec = dFVec / 2;
+            end
+            
+            if length(self.packs) == self.maxNumPack
+                self.packs(1:(end - 1)) = self.packs(2:end);
+                self.packs{end} = newPack;
+            else
+                self.packs{end + 1} = newPack;
+            end
+            
+            usePack = self.packs(2:end);
+            numPack = length(usePack);
+            if numPack <= 1
+                newFockList = fockList;
+                self.fockInList = newFockList;
                 return;
             end
             
-            useDeltaFockVectors = cell(1, length(obj.fockOutVectors));
-            useDensVectors = cell(1, length(obj.fockOutVectors));
-            for spin = 1:length(obj.fockOutVectors)
-                useDeltaFockVectors{spin} = obj.deltaFockVectors{spin}(:, end-numVectors+1:end);
-                useFockVectors{spin} = obj.fockOutVectors{spin}(:, end-numVectors+1:end);
-                useDensVectors{spin} = obj.densOutVectors{spin}(:, end-numVectors+1:end);
-            end
-            useEnergies = obj.energies(end-numVectors+1:end);
-            
-            hessian = zeros(numVectors, numVectors);
-            for spin = 1:length(obj.fockOutVectors)
-                for i = 1:numVectors
-                    for j = 1:numVectors
-                        hessian(i, j) = hessian(i, j) + useEnergies(i) ...
-                            + useDeltaFockVectors{spin}(:, i)' * (useDensVectors{spin}(:, j) - useDensVectors{spin}(:, i));
+            hess = zeros(numPack, numPack);
+            for i = 1:numPack
+                for j = 1:numPack
+                    densi = usePack{i}.densList;
+                    densj = usePack{j}.densList;
+                    dDij = [];
+                    for s = 1:length(fockList)
+                        dDij = [dDij; reshape(densi{s} - densj{s}, [], 1)]; %#ok
                     end
+                    hess(i, j) = usePack{i}.energy + dDij' * usePack{i}.dFVec;
                 end
             end
-            hessian = hessian';
+            onesVec = ones(numPack, 1);
+            hessL = [hess', onesVec; onesVec', 0];
+            [coeff, ~] = linsolve(hessL, [zeros(numPack, 1); 1]);
+            coeff = coeff(1:(end - 1));
             
-            onesVec = -ones(numVectors, 1);
-            hessian = [ ...
-                hessian, onesVec; ...
-                onesVec', 0];
-            diisCoefficients = hessian \ [zeros(numVectors,1); -1];
-            coeffs = diisCoefficients(1:end-1);
-            
-            for spin = 1:length(obj.fockOutVectors)
-                optFockVector(:, spin) = useFockVectors{spin} * coeffs;
+            if self.verbose
+                fprintf('  coeff:')
+                fprintf(' %6.3f', coeff);
+                fprintf('\n')
             end
             
-            if(length(useFockVectors) == 1)
-                useFockVectors = useFockVectors{1};
+            newFockList = cell(1, length(fockList));
+            for spin = 1:length(fockList)
+                allFock = zeros(numel(fockList{1}), numPack);
+                for useInd = 1:numPack
+                    fock = usePack{useInd}.fockList{spin};
+                    allFock(:, useInd) = reshape(fock, [], 1);
+                end
+                newFockList{spin} = reshape(allFock * coeff, size(fockList{1}));
             end
             
-%             disp(coeffs');
+            self.fockInList = newFockList;
+            
         end
         
     end

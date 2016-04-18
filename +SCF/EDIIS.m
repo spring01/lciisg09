@@ -41,7 +41,7 @@ classdef EDIIS < handle
             numPack = length(self.packs);
             if numPack == 1
                 newFockList = fockList;
-                return
+                return;
             end
             
             [hessian, linPart] = self.HessianAndLinPart();
